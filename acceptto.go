@@ -13,6 +13,7 @@ import (
 
 const uid = "cd279a7c988afeabbea999c66b294be4c99d466db9d5032ba00150124f0b00a1"
 const secret = "6bee88f143ee21b09b7054e800eaba918fb45890151088819e040ebc83f743de"
+const email = "a.karimi.k@gmail.com"
 
 // Sample user
 type User struct {
@@ -29,78 +30,78 @@ type AccepttoStatus struct {
 }
 
 func main() {
-    u := User { Email: "a.karimi.k@gmail.com", MfaType: 1 }
-
+    u := User { Email: email }
     m := martini.Classic()
 
-    m.Get("/acceptto-callback", func() string {
-        return "Callback page"
-    });
     m.Get("/enable", func(ctx martini.Context) string {
-        AccepttoEnableMfaUser(u, ctx)
+        _, err := AccepttoEnableMfaUser(u, ctx)
+        if err != nil {
+            return fmt.Sprintf("Error: %q", err)
+        }
         return "Ok. Enabled."
     });
     m.Get("/disable", func(ctx martini.Context) string {
-        AccepttoDisableMfaUser(u, ctx)
+        _, err := AccepttoDisableMfaUser(u, ctx)
+        if err != nil {
+            return fmt.Sprintf("Error: %q", err)
+        }
         return "Ok. Disabled."
     });
     m.Get("/auth", func(ctx martini.Context) string {
-        AccepttoAuthenticateMfaUser(u, ctx)
-        // redirect to https://mfa.acceptto.com/mfa/index?channel=channel_you_got_from_step_3&callback_url=http://your_domain.com/auth/mfa_check
-        return 
-    }    
+        _, err := AccepttoAuthenticateMfaUser(u, ctx)
+        if err != nil {
+            return fmt.Sprintf("Error: %q", err)
+        }
+        return "Ok. authorized"
+    })
     
     m.Run()
 }
 
-func AccepttoEnableMfaUser(user User, ctx martini.Context) {
+func AccepttoEnableMfaUser(user User, ctx martini.Context) (channel string, err error) {
 	log.Printf("acceptto.go:AccepttoDisableMfaUser:%+v", user)
-	approved, err := AcceptoSendRequest(user.Email, "Confirm Acceptto Authentication")
+	approved, channel, err := AcceptoSendRequest(user.Email, "Confirm Acceptto Authentication")
 	if err != nil {
-		ctx.Map( fmt.Errorf("Error: %s", err))
 		return
 	}
 	if approved {
-		user.MfaType=1
-		// TODO
-		//user.Update(c)
-		ctx.Map(user)
 		return
 	} else {
-		ctx.Map( fmt.Errorf("User %s Not Approved", user.Email))
-		return
+	    err = fmt.Errorf("User %s Not Approved", user.Email)
+		return 
 	}
 }
 
-func AccepttoDisableMfaUser(user User, ctx martini.Context){
+func AccepttoDisableMfaUser(user User, ctx martini.Context) (channel string, err error) {
 	log.Printf("acceptto.go:AccepttoDisableMfaUser:%+v", user)
-	approved, err := AcceptoSendRequest(user.Email, "Confirm Acceptto Authentication Removal")
+	approved, channel, err := AcceptoSendRequest(user.Email, "Confirm Acceptto Authentication Removal")
 	if err != nil {
-		ctx.Map( fmt.Errorf("Error: %s", err))
 		return
 	}
 	if approved {
 		return
 	} else {
-		ctx.Map( fmt.Errorf("User %s Not Approved", user.Email))
-		return
+	    err = fmt.Errorf("User %s Not Approved", user.Email)
+		return 
 	}
 }
-func AccepttoAuthenticateMfaUser(user User, ctx martini.Context) (err error, channel string) {
+func AccepttoAuthenticateMfaUser(user User, ctx martini.Context) (channel string, err error) {
 	log.Printf("acceptto.go:AccepttoAuthenticateMfaUser:%+v", user)
-	approved, err, channel := AcceptoSendRequest(user.Email, "Login to Your Awesome Service")
+	approved, channel, err := AcceptoSendRequest(user.Email, "Login to Your Awesome Service")
 	if err != nil {
-		ctx.Map(fmt.Errorf("Error: %s", err))
-		return err, ""
+		return
 	}
 	if approved {
-		return nil, channel
+		return
 	} else {
-		ctx.Map(fmt.Errorf("User %s Not Approved", user.Email))
-		return fmt.Errorf("User %s Not Approved", user.Email), ""
+	    err = fmt.Errorf("User %s Not Approved", user.Email)
+		return 
 	}
 }
-func AcceptoSendRequest(email string, message string) (mfa_result bool, err error, channel string){
+func AcceptoSendRequest(email string, message string) (mfa_result bool, channel string, err error){
+    // Better solution is to redirect to get channel from acceptto API, store it somewhere (like session) and then redirect user to the following page
+    // redirect to https://mfa.acceptto.com/mfa/index?channel=channel_you_got_from_step_3&callback_url=http://your_domain.com/auth/mfa_check
+	
 	mfa_result = false
 	message_encoded := url.QueryEscape(message)
 	log.Printf("acceptto.go:AcceptoSendRequest:%+v", email)
@@ -118,7 +119,9 @@ func AcceptoSendRequest(email string, message string) (mfa_result bool, err erro
 	var data AccepttoRequest
 	json.Unmarshal(body, &data)
 	log.Printf("acceptto request received: %+v", data)
-	cannel = data.Channel
+	channel = data.Channel
+	
+	final_err := err
 	
 	for i:=0;i<30;i++ {
 		time.Sleep(2 * time.Second)
@@ -127,8 +130,6 @@ func AcceptoSendRequest(email string, message string) (mfa_result bool, err erro
 			body_status, err := ioutil.ReadAll(resp_status.Body)
 			if err == nil {
 				log.Printf("acceptto.go:AcceptoSendRequest:received:%s", body_status)
-				break;
-				
 				var accepttoStatus AccepttoStatus
 				json.Unmarshal(body_status, &accepttoStatus)
 				if accepttoStatus.Status=="approved"{
@@ -138,14 +139,18 @@ func AcceptoSendRequest(email string, message string) (mfa_result bool, err erro
 				}
 				if accepttoStatus.Status=="rejected"{
 					log.Printf("acceptto.go:AcceptoSendRequest:rejected:%+v", body_status)
-					err=fmt.Errorf("MFA %s Rejected", email)
+					final_err = fmt.Errorf("MFA %s Rejected", email)
+					break;
+				}
+				if accepttoStatus.Status=="expired"{
+					log.Printf("acceptto.go:AcceptoSendRequest:expired:%+v", body_status)
 					break;
 				}
 			}
 		}
-			
 	}
-	if err == nil && mfa_result==false{
+	
+    if final_err == nil && mfa_result == false {
 		log.Printf("acceptto.go:AcceptoSendRequest:timeout:%+v", data)
 		err=fmt.Errorf("MFA %s Timeout", email)
 	}
