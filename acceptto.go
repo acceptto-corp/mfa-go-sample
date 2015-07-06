@@ -1,3 +1,19 @@
+/****************
+Developer: Amir Karimi <a.karimi.k@gmail.com>
+Company: Rastinware.ir
+*****************
+GETING STARTED
+=================
+
+* Install go
+* Goto the project directory where acceptto.go is located
+* Run following commands:
+    * go get "github.com/go-martini/martini"
+    * go get "github.com/martini-contrib/render"
+* Run the program using this command: go run acceptto.go
+
+*****************/
+
 package main
 
 import (
@@ -5,7 +21,7 @@ import (
 	"fmt"
 	"log"
 	"net/url"
-	"github.com/codegangsta/martini"
+	"github.com/go-martini/martini"
 	"net/http"
 	"time"
     "io/ioutil"
@@ -13,7 +29,6 @@ import (
 
 const uid = "cd279a7c988afeabbea999c66b294be4c99d466db9d5032ba00150124f0b00a1"
 const secret = "6bee88f143ee21b09b7054e800eaba918fb45890151088819e040ebc83f743de"
-const email = "a.karimi.k@gmail.com"
 
 // Sample user
 type User struct {
@@ -30,9 +45,11 @@ type AccepttoStatus struct {
 }
 
 func main() {
-    u := User { Email: email }
     m := martini.Classic()
+    m.Use(martini.Static("assets"))
 
+    /*
+    u := User { Email: email }
     m.Get("/enable", func(ctx martini.Context) string {
         _, err := AccepttoEnableMfaUser(u, ctx)
         if err != nil {
@@ -47,8 +64,15 @@ func main() {
         }
         return "Ok. Disabled."
     });
-    m.Get("/auth", func(ctx martini.Context) string {
-        _, err := AccepttoAuthenticateMfaUser(u, ctx)
+    */
+    
+    m.Get("/auth", func(r *http.Request, ctx martini.Context) string {
+        qs := r.URL.Query()
+        log.Printf("params: %+v", qs)
+    
+        user := User { Email: qs.Get("email") }
+    
+        _, err := AccepttoAuthenticateMfaUser(user, ctx)
         if err != nil {
             return fmt.Sprintf("Error: %q", err)
         }
